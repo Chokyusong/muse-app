@@ -5,10 +5,6 @@
 예시:
 <img width="217" height="158" alt="image" src="https://github.com/user-attachments/assets/916f93e2-f738-4f8d-a5af-1b35a2b7bbed" />
 
-requirements.txt
-desktop_app.py
-heart_aggregate.py
-panda_dm_sender.py
 
 2) 가상환경(권장)
 python -m venv .venv

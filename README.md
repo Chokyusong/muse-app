@@ -3,6 +3,7 @@
 지금 만든 파일을 프로젝트 루트에 두세요.
 
 예시:
+<img width="217" height="158" alt="image" src="https://github.com/user-attachments/assets/916f93e2-f738-4f8d-a5af-1b35a2b7bbed" />
 
 requirements.txt
 desktop_app.py

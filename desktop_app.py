@@ -192,11 +192,28 @@ def visual_len(val) -> int:
     return w
 
 # ---------------- 하트 합계 (탭1) 유틸 ----------------
+# 예외로 '일반하트'로 처리할 패턴(부분 포함)
+AFFILIATE_GENERAL_SUBSTRS = ["@ka"]   # 필요시 "@kb", "@kc" ... 추가
+
+def classify_heart(id_str) -> str:
+    """ID가 제휴/일반인지 분류. 예외 패턴이 들어있으면 '일반하트'."""
+    if id_str is None:
+        return "일반하트"
+    s = str(id_str).strip()
+    # 전각 @ → 반각 @, 소문자화
+    s = s.replace("＠", "@").lower()
+    # 예외 패턴이 '어디든' 포함되어 있으면 일반하트
+    if any(sub in s for sub in AFFILIATE_GENERAL_SUBSTRS):
+        return "일반하트"
+    # 그 외 '@'가 하나라도 있으면 제휴하트
+    return "제휴하트" if "@" in s else "일반하트"
+
 def normalize_nick(nick: str) -> str:
     if not isinstance(nick, str): return ""
     nick = re.sub(r'^\[.*?\]', '', nick)
     nick = re.sub(r'\(.*?\)', '', nick)
     return nick.strip()
+
 
 def normalize_bj(name: str) -> str:
     if not isinstance(name, str): return ""
@@ -593,7 +610,9 @@ class App:
                         df_in["참여BJ"] = df_in["참여BJ"].astype(str).apply(normalize_bj)
 
                     # 일반/제휴 구분
-                    df_in["구분"] = np.where(df_in["ID"].astype(str).str.contains("@"), "제휴하트", "일반하트")
+                    df_in["구분"] = df_in["ID"].apply(classify_heart)
+
+
 
                     # 날짜
                     df_in["날짜"] = date_str
@@ -871,26 +890,50 @@ class App:
 
 
     def start_sender(self):
-        if not SENDER_PY.exists():
-            messagebox.showerror("오류", f"전송 스크립트를 찾을 수 없습니다:\n{SENDER_PY}"); return
+        # 파일 저장 체크
         if not RECIP_CSV.exists() or not MESSAGE_TXT.exists():
-            messagebox.showwarning("안내", "먼저 파일 저장(.env/CSV/MSG)을 누르세요."); return
-        try: LOG_OUT.write_text("", encoding="utf-8"); LOG_ERR.write_text("", encoding="utf-8")
-        except: pass
-        cmd = [sys.executable, str(SENDER_PY), "--status-file", str(STATUS_JSON)]
-        if self.headless.get()=="1": cmd.append("--headless")
-        if self.reset_status.get()=="1": cmd.append("--reset")
+            messagebox.showwarning("안내", "먼저 파일 저장(.env/CSV/MSG)을 누르세요.")
+            return
+
         try:
-            s = int(self.var_start.get().strip() or "0"); l = int(self.var_limit.get().strip() or "0")
-        except: messagebox.showerror("오류", "시작/최대 인원은 정수"); return
-        if s>0: cmd += ["--start", str(s)]
-        if l>0: cmd += ["--limit", str(l)]
-        def _run():
-            with open(LOG_OUT, "a", encoding="utf-8", buffering=1) as out_f, \
-                 open(LOG_ERR, "a", encoding="utf-8", buffering=1) as err_f:
-                proc = subprocess.Popen(cmd, cwd=str(BASE), stdout=out_f, stderr=err_f)
-                self.sender_pid = proc.pid; proc.wait(); self.sender_pid = None
-        threading.Thread(target=_run, daemon=True).start()
+            s = int(self.var_start.get().strip() or "0")
+            l = int(self.var_limit.get().strip() or "0")
+        except:
+            messagebox.showerror("오류", "시작/최대 인원은 정수")
+            return
+
+        headless = (self.headless.get() == "1")
+        reset = (self.reset_status.get() == "1")
+
+        # 로그 파일 초기화
+        try:
+            LOG_OUT.write_text("", encoding="utf-8")
+            LOG_ERR.write_text("", encoding="utf-8")
+        except:
+            pass
+
+        # 내장 모듈로 실행
+        def _run_inside():
+            try:
+                import panda_dm_sender as sender
+                # run_from_gui을 스레드에서 호출
+                sender.run_from_gui(
+                    headless=headless,
+                    status_file=str(STATUS_JSON),
+                    reset=reset,
+                    start=s,
+                    limit=l,
+                )
+            except Exception as e:
+                # 에러는 STDERR 로그에 남기고 알림
+                try:
+                    with open(LOG_ERR, "a", encoding="utf-8") as f:
+                        f.write(f"{now_ts()}  {e}\n")
+                except:
+                    pass
+                messagebox.showerror("실행 오류", f"전송 실행 중 오류:\n{e}")
+
+        threading.Thread(target=_run_inside, daemon=True).start()
         messagebox.showinfo("안내", "전송을 시작했습니다. 현황/로그를 확인하세요.")
 
     def kill_sender(self):

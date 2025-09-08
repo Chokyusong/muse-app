@@ -5,15 +5,10 @@ import os
 # ──[설정]────────────────────────────────────────────────────────
 DEPLOY_DATE = datetime(2025, 9, 1)   # 배포일
 VALID_DAYS  = 40                     # 사용 가능 기간 (일)
-# 테스트용 강제 만료 트리거:
-#   1) 환경변수 TEST_EXPIRE=1
-#   2) 명령행 인자 --expire-now
-#   3) 코드에서 FORCE_EXPIRE=True 로 수동 지정
-FORCE_EXPIRE = False
+FORCE_EXPIRE = False                 # 테스트 강제 만료 스위치
 # ────────────────────────────────────────────────────────────────
 
 def _should_expire(now: datetime) -> bool:
-    """만료 여부 계산 (테스트 강제 만료 포함)"""
     if FORCE_EXPIRE:
         return True
     if os.environ.get("TEST_EXPIRE", "").strip() == "1":
@@ -23,34 +18,25 @@ def _should_expire(now: datetime) -> bool:
     expire_date = DEPLOY_DATE + timedelta(days=VALID_DAYS)
     return now > expire_date
 
-# 팝업(메시지 박스) + 콘솔 대체(fallback)
 def _block_with_message(msg: str):
     try:
         import tkinter as tk
         from tkinter import messagebox
-        root = tk.Tk()
-        root.withdraw()
+        root = tk.Tk(); root.withdraw()
         messagebox.showerror("사용 기간 만료", msg)
     except Exception:
-        # GUI 사용 불가 환경(예: 서버/무헤드)에서는 콘솔로 안내
         print(msg)
     finally:
         sys.exit(1)
 
-# ── 실행 시점 검사 ──────────────────────────────────────────────
 if _should_expire(datetime.now()):
     _block_with_message("⚠️ 사용 기간이 만료되었습니다.\n개발자에게 문의하세요.")
-# ────────────────────────────────────────────────────────────────
-
 
 # -*- coding: utf-8 -*-
 """
-desktop_app.py  (v2025-09-01)
-- PandaLive 하트 집계 & 쪽지 발송 데스크톱 GUI (Tkinter)
-- 요구사항 반영:
-  * '👑 1만+ VIP도 자동발송 대상에 포함' 체크 → 저장/전송에 반영
-  * 상태등 이모지: 성공=🟢, 실패=🔴, 대기=🟡 (최근 30건 리스트)
-  * 자동발송/ VIP 대상 미리보기 표(Treeview)
+desktop_app.py  (v2025-09-01, tag-based rounds)
+- PandaLive 하트 집계 & 쪽지 발송 (Tkinter)
+- 엑셀 총합산: 파일명 4자리 태그(예: 0804) 기준 회차/요약 생성
 """
 
 import os, sys, io, re, csv, json, time, threading, subprocess, zipfile, unicodedata
@@ -67,16 +53,10 @@ from tkinter import (
     filedialog, messagebox
 )
 
-# ====== helpers for desktop_app.py (paste near the top) ======
-import re, io, csv, unicodedata
-from datetime import datetime
-import pandas as pd
-
-# 엑셀 시트 제목에 안전한 문자열
+# ====== helpers ======
 def sanitize(name: str) -> str:
     return re.sub(r'[\\/*?:\[\]]', "_", str(name))[:31] or "Sheet"
 
-# 표시 폭 계산(열 자동폭)
 def visual_len(val) -> int:
     s = str("" if val is None else val)
     w = 0
@@ -87,13 +67,11 @@ def visual_len(val) -> int:
             w += 1
     return w
 
-# zero-width 제거
 def _strip_zw(s: str) -> str:
     return re.sub(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]", "", s)
 
 BRACKET_ANY = r"[()\[\]{}<>「」『』【】〈〉《》⟦⟧❲❳]"
 
-# 닉네임 정규화(강화)
 def normalize_nick(nick: str) -> str:
     if not isinstance(nick, str):
         return ""
@@ -110,7 +88,6 @@ def normalize_nick(nick: str) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
-# BJ명 정규화
 def normalize_bj(name: str) -> str:
     if not isinstance(name, str):
         return ""
@@ -120,7 +97,6 @@ def normalize_bj(name: str) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
-# 파일명에서 날짜 추출(YYYY-MM-DD)
 def extract_date_from_name(name: str) -> str:
     s = name.lower()
     m = re.search(r'(20\d{2})[.\-_](\d{1,2})[.\-_](\d{1,2})', s)
@@ -135,12 +111,10 @@ def extract_date_from_name(name: str) -> str:
         return f"{y:04d}-{int(m[1]):02d}-{int(m[2]):02d}"
     return datetime.now().strftime("%Y-%m-%d")
 
-# 로컬 파일 경로 읽기 (CSV/엑셀 자동)
 def read_any_table(path_or_file, sheet=None) -> pd.DataFrame:
     p = str(path_or_file)
     if p.lower().endswith(".xlsx"):
         return pd.read_excel(path_or_file, sheet_name=(sheet if str(sheet).strip() else 0))
-    # CSV: 인코딩/구분자 추정
     with open(path_or_file, "rb") as f:
         raw = f.read()
     for enc in ["utf-8-sig","utf-8","cp949","euc-kr"]:
@@ -156,7 +130,6 @@ def read_any_table(path_or_file, sheet=None) -> pd.DataFrame:
             continue
     raise ValueError("CSV 인코딩/구분자 해석 실패")
 
-
 # ===== 경로 상수 =====
 BASE = Path(__file__).resolve().parent
 RECIP_CSV = BASE / "recipients_preview.csv"
@@ -167,7 +140,7 @@ SENDER_PY = BASE / "panda_dm_sender.py"
 LOG_OUT = BASE / "sender_stdout.log"
 LOG_ERR = BASE / "sender_stderr.log"
 
-FULLWIDTH_SPACE = "\u3000"  # 전각 공백
+FULLWIDTH_SPACE = "\u3000"
 
 def now_ts() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -181,64 +154,20 @@ def load_status(path: Path) -> dict:
 def save_status(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-def visual_len(val) -> int:
-    s = str(val) if val is not None else ""
-    w = 0
-    for ch in s:
-        if unicodedata.east_asian_width(ch) in ("F","W","A") or ord(ch) >= 0x1F300:
-            w += 2
-        else:
-            w += 1
-    return w
-
-# ---------------- 하트 합계 (탭1) 유틸 ----------------
-# 예외로 '일반하트'로 처리할 패턴(부분 포함)
-AFFILIATE_GENERAL_SUBSTRS = ["@ka"]   # 필요시 "@kb", "@kc" ... 추가
+# ---------------- 하트 합계 유틸 ----------------
+AFFILIATE_GENERAL_SUBSTRS = ["@ka"]   # '@ka' 포함 시 일반하트 예외
 
 def classify_heart(id_str) -> str:
-    """ID가 제휴/일반인지 분류. 예외 패턴이 들어있으면 '일반하트'."""
     if id_str is None:
         return "일반하트"
     s = str(id_str).strip()
-    # 전각 @ → 반각 @, 소문자화
     s = s.replace("＠", "@").lower()
-    # 예외 패턴이 '어디든' 포함되어 있으면 일반하트
     if any(sub in s for sub in AFFILIATE_GENERAL_SUBSTRS):
         return "일반하트"
-    # 그 외 '@'가 하나라도 있으면 제휴하트
     return "제휴하트" if "@" in s else "일반하트"
-
-def normalize_nick(nick: str) -> str:
-    if not isinstance(nick, str): return ""
-    nick = re.sub(r'^\[.*?\]', '', nick)
-    nick = re.sub(r'\(.*?\)', '', nick)
-    return nick.strip()
-
-
-def normalize_bj(name: str) -> str:
-    if not isinstance(name, str): return ""
-    return re.sub(r'^\[.*?\]', '', name).strip()
 
 def sanitize_name(name: str) -> str:
     return re.sub(r'[\\/*?:\[\]]', "_", str(name))[:31] or "BJ"
-
-def read_any_table(path: Path, sheet: str|int|None):
-    name = path.name.lower()
-    if name.endswith(".xlsx"):
-        return pd.read_excel(path, sheet_name=(sheet if str(sheet).strip() else 0))
-    raw = path.read_bytes()
-    for enc in ["utf-8","utf-8-sig","cp949","euc-kr"]:
-        try:
-            text = raw.decode(enc)
-            try:
-                dialect = csv.Sniffer().sniff(text[:4000], delimiters=[",","\t",";","|"])
-                sep = dialect.delimiter
-            except Exception:
-                sep = ","
-            return pd.read_csv(io.StringIO(text), sep=sep)
-        except Exception:
-            continue
-    raise ValueError("CSV 인코딩/구분자 해석 실패")
 
 def preprocess_single(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = [str(c).strip() for c in df.columns]
@@ -266,11 +195,12 @@ def preprocess_single(df: pd.DataFrame) -> pd.DataFrame:
 
 def make_bj_excel_bytes(bj_name: str, sub_df: pd.DataFrame, admin: bool) -> bytes:
     sub = sub_df.copy()
-    sub["is_aff"] = sub["ID"].str.contains("@")
+    # 예외패턴까지 반영한 제휴판별
+    sub["is_aff"] = sub["ID"].apply(lambda x: classify_heart(x) == "제휴하트")
     gen = sub[~sub["is_aff"]].sort_values("후원하트", ascending=False)[["ID","닉네임","후원하트"]].copy()
     aff = sub[ sub["is_aff"]].sort_values("후원하트", ascending=False)[["ID","닉네임","후원하트"]].copy()
     gsum, asum = int(gen["후원하트"].sum()), int(aff["후원하트"].sum())
-    import openpyxl
+
     from openpyxl import Workbook
     from openpyxl.utils import get_column_letter
 
@@ -309,20 +239,6 @@ def pack_zip(files: dict[str, bytes]) -> bytes:
         for fname, data in files.items():
             zf.writestr(fname, data)
     zbio.seek(0); return zbio.getvalue()
-
-def extract_date_from_name(name: str) -> str:
-    s = name.lower()
-    m = re.search(r'(20\d{2})[.\-_](\d{1,2})[.\-_](\d{1,2})', s)
-    if m: return f"{int(m[1]):04d}-{int(m[2]):02d}-{int(m[3]):02d}"
-    m = re.search(r'(20\d{2})(\d{2})(\d{2})', s)
-    if m: return f"{int(m[1]):04d}-{int(m[2]):02d}-{int(m[3]):02d}"
-    m = re.search(r'(\d{2})[.\-_](\d{1,2})[.\-_](\d{1,2})', s)
-    if m: return f"{2000+int(m[1]):04d}-{int(m[2]):02d}-{int(m[3]):02d}"
-    m = re.search(r'(\d{1,2})(\d{2})', s)
-    if m and len(m.group(0)) == 4:
-        y = datetime.now().year
-        return f"{y:04d}-{int(m[1]):02d}-{int(m[2]):02d}"
-    return datetime.now().strftime("%Y-%m-%d")
 
 # ---------------- DM 발송 (탭2) 유틸 ----------------
 def guess_columns(df: pd.DataFrame) -> Tuple[str,str,str]:
@@ -391,6 +307,7 @@ def prepare_from_csv(df: pd.DataFrame, id_col: str, nick_col: str, heart_col: st
     return auto_df, vip_df
 
 def build_messages_with_endspaces(base_msg: str, n: int) -> List[str]:
+    FULLWIDTH_SPACE = "\u3000"
     lines = base_msg.splitlines() or [base_msg]
     L = max(1, len(lines))
     out: List[str] = []
@@ -430,13 +347,11 @@ class App:
         if not out:
             return
         try:
-            # 필요한 컬럼만 저장
             cols = [c for c in ["후원아이디","닉네임","후원하트"] if c in self._vip_df_cache.columns]
             self._vip_df_cache[cols].to_excel(out, index=False)
             messagebox.showinfo("완료", f"VIP 엑셀 저장: {out}")
         except Exception as e:
             messagebox.showerror("오류", f"엑셀 저장 실패: {e}")
-
 
     def __init__(self, root: Tk):
         self.root = root
@@ -484,9 +399,6 @@ class App:
         self.sum_log.configure(state=NORMAL); self.sum_log.insert(END, msg.rstrip()+"\n")
         self.sum_log.configure(state=DISABLED); self.sum_log.see(END)
 
-    # (탭1) 함수들 — 생략: pick_single/save_admin_zip/save_bj_zip/pick_multi/save_master_excel
-    #  👉 이전 메시지와 동일 구현이라 길이상 생략. 위에서 이미 정의한 함수들 사용.
-
     def pick_single(self):
         path = filedialog.askopenfilename(filetypes=[("CSV/XLSX","*.csv *.xlsx")])
         if not path: return
@@ -495,6 +407,7 @@ class App:
             df = read_any_table(Path(path), sheet=None)
             base = preprocess_single(df)
             summary = base.groupby("참여BJ", as_index=False)["후원하트"].sum().sort_values("후원하트", ascending=False)
+
             admin_files, bj_files = {"요약.xlsx": self._to_excel_bytes(summary)}, {"요약.xlsx": self._to_excel_bytes(summary)}
             for bj in summary["참여BJ"]:
                 sub = base[base["참여BJ"] == bj][["ID","닉네임","후원하트"]]
@@ -508,7 +421,6 @@ class App:
             messagebox.showerror("오류", str(e))
 
     def _to_excel_bytes(self, df: pd.DataFrame) -> bytes:
-        import openpyxl
         from openpyxl import Workbook
         from openpyxl.utils import get_column_letter
         wb = Workbook(); ws = wb.active; ws.title = "요약"
@@ -543,13 +455,10 @@ class App:
 
     def save_master_excel(self, *_ev):
         import time
-        from pathlib import Path
-        import pandas as pd
-        import numpy as np
         from openpyxl import Workbook
         from openpyxl.utils import get_column_letter
 
-        # ---------- 재진입 가드 & 디바운스 ----------
+        # 재진입 가드/디바운스
         if getattr(self, "_saving_master", False):
             return
         now = time.time()
@@ -571,7 +480,6 @@ class App:
                 ws.column_dimensions[letter].width = max(12, min(m + 2, 80))
 
         def _unique_sheet_name(base: str, used: set[str]) -> str:
-            # sanitize 는 파일 상단 helper에 이미 있음
             base = sanitize(str(base))[:31] or "Sheet"
             name = base
             i = 2
@@ -583,20 +491,28 @@ class App:
             return name
 
         try:
-            # 0) 선택 파일 확인
             if not getattr(self, "multi_paths", None):
                 messagebox.showwarning("안내", "먼저 '파일 여러 개 선택'으로 CSV/XLSX 파일을 선택하세요.")
                 _cleanup(); return
 
-            # 1) 파일별 읽기 + 표준화 + 날짜 부여
+            # 1) 파일 읽기 + 전처리 + 파일명 태그 부여
+            self._seen_tags = []  # 최초 등장 순서 체크용(정렬은 아래에서 숫자 오름차순)
             all_rows, err_files = [], []
             for p in self.multi_paths:
                 p = Path(p)
                 try:
-                    date_str = extract_date_from_name(p.name)   # YYYY-MM-DD
-                    df_in = read_any_table(p, sheet=None)       # CSV/Excel 자동 판별
+                    # 파일명에서 4자리 태그 추출(없으면 MMDD 보정)
+                    m4 = re.search(r'(\d{4})', p.name)
+                    if m4:
+                        tag = m4.group(1)  # 예: '0804'
+                    else:
+                        tag = extract_date_from_name(p.name)[5:].replace('-', '')  # 'MMDD'
 
-                    # 후원자 ID/닉네임 분리 + 정규화
+                    if tag not in self._seen_tags:
+                        self._seen_tags.append(tag)
+
+                    df_in = read_any_table(p, sheet=None)
+
                     mix_col = "후원 아이디(닉네임)"
                     if mix_col not in df_in.columns:
                         raise ValueError(f"{p.name}: '{mix_col}' 컬럼이 없습니다.")
@@ -609,25 +525,23 @@ class App:
                     if "참여BJ" in df_in.columns:
                         df_in["참여BJ"] = df_in["참여BJ"].astype(str).apply(normalize_bj)
 
-                    # 일반/제휴 구분
+                    # 제휴/일반 구분 (예외 포함)
                     df_in["구분"] = df_in["ID"].apply(classify_heart)
 
-
-
-                    # 날짜
-                    df_in["날짜"] = date_str
-
-                    # 후원하트 정수화
+                    # 하트 정수화
                     if "후원하트" in df_in.columns:
                         df_in["후원하트"] = (
                             df_in["후원하트"].astype(str).str.replace(",", "", regex=False)
                             .pipe(pd.to_numeric, errors="coerce").fillna(0).astype(int)
                         )
 
-                    # 필요한 컬럼만 수집
-                    cols = ["날짜", "후원시간", "참여BJ", "ID", "닉네임", "후원하트", "구분"]
+                    # 파일명 태그
+                    df_in["회차태그"] = tag
+
+                    cols = ["회차태그", "후원시간", "참여BJ", "ID", "닉네임", "후원하트", "구분"]
                     exist_cols = [c for c in cols if c in df_in.columns]
                     all_rows.append(df_in[exist_cols].copy())
+
                 except Exception as e:
                     err_files.append(f"{p.name}: {e}")
 
@@ -639,39 +553,46 @@ class App:
 
             merged = pd.concat(all_rows, ignore_index=True)
 
-            # 안전망: 닉네임/BJ 재정규화
+            # 안전망 정규화
             if "닉네임" in merged.columns:
                 merged["닉네임"] = merged["닉네임"].apply(normalize_nick)
             if "참여BJ" in merged.columns:
                 merged["참여BJ"] = merged["참여BJ"].apply(normalize_bj)
 
-            # 2) 요약_일별
-            need = {"날짜", "참여BJ", "구분", "후원하트"}
+            # 2) 회차번호 매핑 (태그 숫자 오름차순)
+            tags_sorted = sorted(getattr(self, "_seen_tags", []), key=lambda x: int(x))
+            tag_to_round = {tag: i + 1 for i, tag in enumerate(tags_sorted)}
+
+            # 3) 요약_일별 (파일명 태그 기준)
+            need = {"회차태그", "참여BJ", "구분", "후원하트"}
             if not need.issubset(set(merged.columns)):
-                messagebox.showerror("오류", "필수 컬럼(날짜/참여BJ/구분/후원하트) 부족으로 요약을 만들 수 없습니다.")
+                messagebox.showerror("오류", "필수 컬럼(회차태그/참여BJ/구분/후원하트) 부족으로 요약을 만들 수 없습니다.")
                 _cleanup(); return
 
             piv = (
-                merged.groupby(["날짜", "참여BJ", "구분"], as_index=False)["후원하트"].sum()
-                    .pivot(index=["날짜", "참여BJ"], columns="구분", values="후원하트")
-                    .fillna(0)
-                    .reset_index()
+                merged.groupby(["회차태그", "참여BJ", "구분"], as_index=False)["후원하트"].sum()
+                      .pivot(index=["회차태그", "참여BJ"], columns="구분", values="후원하트")
+                      .fillna(0)
+                      .reset_index()
             )
             for col in ["일반하트", "제휴하트"]:
                 if col not in piv.columns:
                     piv[col] = 0
             piv["총합"] = piv["일반하트"] + piv["제휴하트"]
-            df_daily = piv[["날짜", "참여BJ", "일반하트", "제휴하트", "총합"]] \
-                        .sort_values(["날짜", "참여BJ"]).reset_index(drop=True)
+            piv["회차"] = piv["회차태그"].map(tag_to_round).fillna(0).astype(int)
+            piv = piv[piv["회차"] > 0].sort_values(["회차", "참여BJ"]).reset_index(drop=True)
 
-            # 3) 요약_참여BJ_총계 (정규화 키)
+            df_daily = piv[["회차", "회차태그", "참여BJ", "일반하트", "제휴하트", "총합"]].rename(columns={"회차태그": "태그"})
+            df_daily["회차"] = df_daily["회차"].astype(str) + "회차"
+
+            # 4) 요약_참여BJ_총계
             merged["참여BJ_정규화"] = merged["참여BJ"].apply(normalize_bj)
             total_by_bj = (
                 merged.groupby(["참여BJ_정규화", "구분"], as_index=False)["후원하트"].sum()
-                    .pivot(index="참여BJ_정규화", columns="구분", values="후원하트")
-                    .fillna(0)
-                    .reset_index()
-                    .rename(columns={"참여BJ_정규화": "참여BJ"})
+                      .pivot(index="참여BJ_정규화", columns="구분", values="후원하트")
+                      .fillna(0)
+                      .reset_index()
+                      .rename(columns={"참여BJ_정규화": "참여BJ"})
             )
             for col in ["일반하트", "제휴하트"]:
                 if col not in total_by_bj.columns:
@@ -679,18 +600,18 @@ class App:
             total_by_bj["총합"] = total_by_bj["일반하트"] + total_by_bj["제휴하트"]
             df_total = total_by_bj[["참여BJ", "일반하트", "제휴하트", "총합"]].copy()
 
-            # 4) 저장 경로
+            # 5) 저장 경로
+            # 첫 파일명에서 날짜 문자열만 활용해 기본 파일명 구성 (실제 집계는 태그 기준)
             default_name = f"총합산_{extract_date_from_name(Path(self.multi_paths[0]).name)}.xlsx"
             out = filedialog.asksaveasfilename(defaultextension=".xlsx", initialfile=default_name)
             if not out:
                 _cleanup(); return
 
-            # 5) 엑셀 작성(단 한 번만 생성)
+            # 6) 엑셀 작성
             wb = Workbook()
 
             # (A) 요약_일별
-            ws_daily = wb.active
-            ws_daily.title = "요약_일별"
+            ws_daily = wb.active; ws_daily.title = "요약_일별"
             ws_daily.append(list(df_daily.columns))
             for row in df_daily.itertuples(index=False):
                 ws_daily.append(list(row))
@@ -703,9 +624,9 @@ class App:
                 ws_total.append(list(row))
             _auto_width(ws_total)
 
-            # (C) 참여BJ별 상세 — 정규화 키로 단일 그룹핑 + 시트명 충돌 방지
+            # (C) 참여BJ별 상세 + 회차별 합계(태그 기준)
             merged_sorted = merged.copy()
-            sort_cols = [c for c in ["날짜", "후원시간"] if c in merged_sorted.columns]
+            sort_cols = [c for c in ["회차태그", "후원시간"] if c in merged_sorted.columns]
             if sort_cols:
                 merged_sorted = merged_sorted.sort_values(sort_cols)
             merged_sorted["BJ_KEY"] = merged_sorted["참여BJ"].apply(normalize_bj)
@@ -723,15 +644,26 @@ class App:
 
                 ws.append([f"총 일반하트={gsum}", f"총 제휴하트={asum}", f"총합={tsum}"])
 
-                cols = ["날짜", "후원시간", "ID", "닉네임", "후원하트", "구분"]
+                cols = ["회차태그", "후원시간", "ID", "닉네임", "후원하트", "구분"]
                 exist_cols = [c for c in cols if c in sub.columns]
                 ws.append(exist_cols)
                 for row in sub[exist_cols].itertuples(index=False):
                     ws.append(list(row))
 
+                # 하단: 회차별 합계 (파일명 태그 기준)
+                if "회차태그" in sub.columns:
+                    per_round = sub.groupby("회차태그", as_index=False)["후원하트"].sum()
+                    per_round["회차번호"] = per_round["회차태그"].map(tag_to_round).fillna(0).astype(int)
+                    per_round = per_round[per_round["회차번호"] > 0].sort_values("회차번호")
+                    if not per_round.empty:
+                        ws.append([])
+                        ws.append(["회차별 합계"])
+                        ws.append(["회차", "태그", "하트합계"])
+                        for _, r in per_round.iterrows():
+                            ws.append([f"{int(r['회차번호'])}회차", str(r["회차태그"]), int(r["후원하트"])])
+
                 _auto_width(ws)
 
-            # 저장 (단 한 번)
             wb.save(out)
             self.log_sum(f"[저장] 총합산 엑셀 저장: {out}")
             messagebox.showinfo("완료", f"총합산 엑셀 저장 완료:\n{out}")
@@ -743,7 +675,7 @@ class App:
         finally:
             _cleanup()
 
-    # ----- 탭2 -----
+    # ----- 탭2 (쪽지 전송: 기존 그대로) -----
     def build_tab_dm(self):
         f = self.tab_dm
 
@@ -764,16 +696,13 @@ class App:
         ttk.Label(right, text="수동 ID 입력(줄바꿈/쉼표/공백)").pack(anchor="w", pady=(6,0))
         self.txt_manual = Text(right, height=6); self.txt_manual.pack(fill="both", expand=True, pady=2)
 
-        
         frm_mid = ttk.Frame(f); frm_mid.pack(fill="x", padx=10, pady=8)
         ttk.Button(frm_mid, text="💾 파일 저장(.env/CSV/MSG)", command=self.save_bundle).pack(side="left", padx=2)
         ttk.Button(frm_mid, text="메시지 변형 미리보기", command=self.preview_messages).pack(side="left", padx=2)
 
-        # 자동발송/ VIP 인원 카운트 표시
         self.lbl_counts = StringVar(value="자동발송 대상: 0명 | VIP: 0명")
         ttk.Label(f, textvariable=self.lbl_counts).pack(anchor="w", padx=12, pady=(0,4))
 
-        # 대상 미리보기 표
         frm_lists = ttk.Frame(f); frm_lists.pack(fill="x", padx=10, pady=4)
         left_list = ttk.LabelFrame(frm_lists, text="자동발송 대상 (1,000~9,999)")
         right_list = ttk.LabelFrame(frm_lists, text="VIP 대상 (10,000+)")
@@ -790,14 +719,10 @@ class App:
             self.tree_vip.heading(c, text=t)
         self.tree_vip.pack(fill="both", expand=True)
 
-        # VIP 편의 버튼 (복사 / 엑셀)
         vip_btns = ttk.Frame(right_list)
         vip_btns.pack(fill="x", padx=4, pady=4)
         ttk.Button(vip_btns, text="VIP ID 복사", command=self.copy_vip_to_clipboard).pack(side="left", padx=2)
         ttk.Button(vip_btns, text="VIP 엑셀 저장", command=self.export_vip_excel).pack(side="left", padx=2)
-
-        # ⬆⬆⬆ 여기까지 교체 ⬆⬆⬆
-
 
         frm_run = ttk.Frame(f); frm_run.pack(fill="x", padx=10, pady=8)
         ttk.Label(frm_run, text="시작 인덱스").pack(side="left", padx=3)
@@ -813,9 +738,9 @@ class App:
         frm_dash = ttk.LabelFrame(f, text="실시간 현황 / 로그"); frm_dash.pack(fill="both", expand=True, padx=10, pady=8)
         self.lbl_stats = StringVar(value="총 대상: 0 | 성공: 0 | 실패: 0 | 대기: 0")
         ttk.Label(frm_dash, textvariable=self.lbl_stats).pack(anchor="w", padx=8, pady=4)
-        ttk.Label(frm_dash, text="상태 / STDOUT").pack(anchor="w", padx=8)
+        ttk.Label(frm_dash, text="상태").pack(anchor="w", padx=8)
         self.log_out = Text(frm_dash, height=10); self.log_out.pack(fill="both", expand=True, padx=8)
-        ttk.Label(frm_dash, text="STDERR").pack(anchor="w", padx=8)
+        ttk.Label(frm_dash, text="무시").pack(anchor="w", padx=8)
         self.log_err = Text(frm_dash, height=6); self.log_err.pack(fill="both", expand=True, padx=8)
 
         self.sender_pid = None
@@ -840,15 +765,11 @@ class App:
         self._auto_df_cache = auto_df
         self._vip_df_cache  = vip_df
 
-        # 미리보기 표에 상위 50개 채우기
         self._fill_tree(self.tree_auto, [(r["후원아이디"], r.get("닉네임",""), r["후원하트"]) for _,r in auto_df.head(50).iterrows()])
         self._fill_tree(self.tree_vip,  [(r["후원아이디"], r.get("닉네임",""), r["후원하트"]) for _,r in vip_df.head(50).iterrows()])
 
-        # 인원 수 표시 업데이트  ⬅⬅⬅ 추가
         self.lbl_counts.set(f"자동발송 대상: {len(auto_df)}명 | VIP: {len(vip_df)}명")
-
         messagebox.showinfo("완료", f"자동발송 {len(auto_df)}명 / VIP {len(vip_df)}명 추출 완료 (미리보기 상위 50명 표시).")
-
 
     def save_bundle(self):
         manual = self.txt_manual.get("1.0", END).strip()
@@ -857,7 +778,6 @@ class App:
             tokens = list(dict.fromkeys(tokens))
             out_df = pd.DataFrame({"후원아이디": tokens, "닉네임": ["" for _ in tokens], "후원하트": [1000 for _ in tokens]})
         else:
-            # 자동발송 대상만 사용
             out_df = self._auto_df_cache
 
         base_message = self.txt_msg.get("1.0", END).rstrip("\n")
@@ -873,7 +793,6 @@ class App:
                    "meta":{"created": now_ts()}}
         save_status(STATUS_JSON, st_json)
 
-
     def preview_messages(self):
         manual = self.txt_manual.get("1.0", END).strip()
         if manual:
@@ -881,16 +800,14 @@ class App:
             tokens = list(dict.fromkeys(tokens))
             out_df = pd.DataFrame({"후원아이디": tokens, "닉네임": ["" for _ in tokens], "후원하트": [1000 for _ in tokens]})
         else:
-            out_df = self._auto_df_cache   # 자동발송 대상만
+            out_df = self._auto_df_cache
 
         base_message = self.txt_msg.get("1.0", END).rstrip("\n")
         msgs = build_messages_with_endspaces(base_message, len(out_df))
         sample = "\n\n".join(f"[{i}] {r['후원아이디']}\n{msgs[i]}" for i,(_,r) in enumerate(out_df.head(5).iterrows()))
         messagebox.showinfo("미리보기 (상위 5명)", sample or "없음")
 
-
     def start_sender(self):
-        # 파일 저장 체크
         if not RECIP_CSV.exists() or not MESSAGE_TXT.exists():
             messagebox.showwarning("안내", "먼저 파일 저장(.env/CSV/MSG)을 누르세요.")
             return
@@ -905,18 +822,15 @@ class App:
         headless = (self.headless.get() == "1")
         reset = (self.reset_status.get() == "1")
 
-        # 로그 파일 초기화
         try:
             LOG_OUT.write_text("", encoding="utf-8")
             LOG_ERR.write_text("", encoding="utf-8")
         except:
             pass
 
-        # 내장 모듈로 실행
         def _run_inside():
             try:
                 import panda_dm_sender as sender
-                # run_from_gui을 스레드에서 호출
                 sender.run_from_gui(
                     headless=headless,
                     status_file=str(STATUS_JSON),
@@ -925,7 +839,6 @@ class App:
                     limit=l,
                 )
             except Exception as e:
-                # 에러는 STDERR 로그에 남기고 알림
                 try:
                     with open(LOG_ERR, "a", encoding="utf-8") as f:
                         f.write(f"{now_ts()}  {e}\n")

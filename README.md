@@ -1,7 +1,5 @@
-파일 다운로드 "https://1drv.ms/u/c/2bc74b77c11f9f06/Edwdslop7j1OkoeEmH65FnwBsbJvsVEIb7yEpymt6QvEYA?e=xmtsxG"
-파일 내보내기
-1) 준비
 
+1) 준비
 
 <img width="791" height="501" alt="image" src="https://github.com/user-attachments/assets/9248ea40-15ed-4592-9d93-20be5f645ee4" />
 

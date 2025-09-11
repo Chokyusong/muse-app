@@ -457,6 +457,34 @@ class App:
         import time
         from openpyxl import Workbook
         from openpyxl.utils import get_column_letter
+        
+        # === 회차 인덱스 매핑 준비 ===
+        round_info = []
+        seen = set()
+        for p in self.multi_paths:
+            fn = Path(p).name
+            ds = extract_date_from_name(fn)  # YYYY-MM-DD
+            if ds in seen:
+                continue
+            seen.add(ds)
+
+            m4 = re.search(r'(\d{4})', fn)
+            if m4:
+                tag = m4.group(1)  # 예: '0804'
+            else:
+                tag = ds[5:].replace('-', '')  # MMDD
+
+            try:
+                sort_key = int(tag)
+            except:
+                sort_key = int(ds.replace('-', ''))  # YYYYMMDD fallback
+                tag = ds[5:].replace('-', '')
+
+            round_info.append((sort_key, ds, tag))
+
+        round_info.sort(key=lambda x: x[0])
+        date_to_round = {ds: i+1 for i, (_, ds, _) in enumerate(round_info)}
+        date_to_tag   = {ds: tag for _, ds, tag in round_info}
 
         # 재진입 가드/디바운스
         if getattr(self, "_saving_master", False):
@@ -622,6 +650,22 @@ class App:
             ws_total.append(list(df_total.columns))
             for row in df_total.sort_values("총합", ascending=False).itertuples(index=False):
                 ws_total.append(list(row))
+            per_round = pd.DataFrame(columns=["회차번호", "후원하트", "회차태그"])  # 안전한 기본값
+            if {"회차태그", "후원하트"}.issubset(merged.columns):
+                per_round = (
+                    merged.groupby("회차태그", as_index=False)["후원하트"].sum()
+                )
+                per_round["회차번호"] = per_round["회차태그"].map(tag_to_round)
+                per_round = per_round.dropna(subset=["회차번호"]).sort_values("회차번호")
+                per_round["회차번호"] = per_round["회차번호"].astype(int)
+
+            if not per_round.empty:
+                ws_total.append([])
+                ws_total.append(["회차별 전체 합계"])
+                ws_total.append(["회차번호", "후원하트", "회차태그"])
+                for r in per_round.to_dict("records"):
+                    ws_total.append([r["회차번호"], int(r["후원하트"]), r["회차태그"]])
+    
             _auto_width(ws_total)
 
             # (C) 참여BJ별 상세 + 회차별 합계(태그 기준)
@@ -903,4 +947,3 @@ if __name__ == "__main__":
     root = Tk()
     app = App(root)
     root.mainloop()
-

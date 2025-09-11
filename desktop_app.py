@@ -658,9 +658,9 @@ class App:
                     if not per_round.empty:
                         ws.append([])
                         ws.append(["회차별 합계"])
-                        ws.append(["회차", "태그", "하트합계"])
+                        ws.append(["회차", "하트합계", "회차태그"])
                         for _, r in per_round.iterrows():
-                            ws.append([f"{int(r['회차번호'])}회차", str(r["회차태그"]), int(r["후원하트"])])
+                            ws.append([f"{int(r['회차번호'])}회차",int(r["후원하트"]),str(r["회차태그"])])
 
                 _auto_width(ws)
 
@@ -903,3 +903,4 @@ if __name__ == "__main__":
     root = Tk()
     app = App(root)
     root.mainloop()
+

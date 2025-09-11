@@ -639,14 +639,14 @@ class App:
             wb = Workbook()
 
             # (A) 요약_일별
-            ws_daily = wb.active; ws_daily.title = "요약_일별"
+            ws_daily = wb.active; ws_daily.title = "일별"
             ws_daily.append(list(df_daily.columns))
             for row in df_daily.itertuples(index=False):
                 ws_daily.append(list(row))
             _auto_width(ws_daily)
 
             # (B) 요약_참여BJ_총계
-            ws_total = wb.create_sheet(title="요약_참여BJ_총계")
+            ws_total = wb.create_sheet(title="참여BJ_총계")
             ws_total.append(list(df_total.columns))
             for row in df_total.sort_values("총합", ascending=False).itertuples(index=False):
                 ws_total.append(list(row))
@@ -947,3 +947,4 @@ if __name__ == "__main__":
     root = Tk()
     app = App(root)
     root.mainloop()
+
